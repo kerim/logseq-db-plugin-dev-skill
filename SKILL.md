@@ -246,7 +246,7 @@ await logseq.Editor.appendBlockInPage('My Article', '#research')
 
 ### Creating Tag/Class Pages (DB)
 
-**VERIFIED WORKING** (tested in POC 4): Tag/class pages can be created programmatically.
+Tag/class pages can be created programmatically.
 
 ```typescript
 // Create a tag (class) page
@@ -266,7 +266,7 @@ const tagPage = await logseq.Editor.createPage(
 
 ### Property Schemas on Tags (DB) - UI-ONLY ⚠️
 
-**CRITICAL FINDING** (POC 4): Property schemas CANNOT be defined programmatically via plugin API.
+**CRITICAL**: Property schemas CANNOT be defined programmatically via plugin API.
 
 **How Logseq stores schemas internally:**
 ```clojure
@@ -385,7 +385,7 @@ await logseq.Editor.insertBatchBlock(
 
 ### Creating Nested Block Structures (DB)
 
-**VERIFIED WORKING** (tested in POC 3): `insertBatchBlock` works perfectly for creating nested block hierarchies.
+`insertBatchBlock` works perfectly for creating nested block hierarchies.
 
 ```typescript
 // ✅ WORKS PERFECTLY - Nested blocks with children array
@@ -724,7 +724,7 @@ pnpm dev
 - Use `console.log()` for debugging
 - Check Logseq's plugin console for errors
 
-### Exposing Functions to Browser Console (POC 6)
+### Exposing Functions to Browser Console
 
 **Problem**: Logseq plugins run in an iframe context, so setting functions on `window` doesn't make them accessible from the browser console.
 
@@ -758,9 +758,9 @@ async function main() {
 await window.myFunction()
 ```
 
-**Note**: This is useful for POC testing. Production plugins should use proper UI instead of console commands.
+**Note**: This is useful for development and testing. Production plugins should use proper UI instead of console commands.
 
-### Checking for Duplicates (POC 6)
+### Checking for Duplicates
 
 **Best Practice**: Query by unique identifier property, not by page title.
 
@@ -795,7 +795,7 @@ async function checkIfExistsByTitle(title: string): Promise<boolean> {
 - External IDs: check by `externalId`, `doi`, `isbn`, etc.
 - Any unique identifier property
 
-## React Integration (POC 6)
+## React Integration
 
 **CRITICAL**: Logseq plugins with React UIs require a specific setup pattern to work correctly.
 
@@ -962,8 +962,8 @@ root.render(
 
 **Why?**
 - React.StrictMode intentionally double-invokes functions in development
-- This causes duplicate API calls, duplicate imports, duplicate UI updates
-- In POC 6, this caused triple imports (StrictMode 2x + other render = 3x)
+- This causes duplicate API calls, duplicate data operations, duplicate UI updates
+- In testing, this caused operations to run multiple times (StrictMode 2x + other factors = 3x)
 - **Solution**: Remove StrictMode from plugin code
 
 ### Preventing Duplicate Function Calls
@@ -1126,13 +1126,13 @@ Use clear tag prefixes ([GUARD], [START], [SUCCESS], [ERROR], [END]) to track ex
 7. **Property Namespacing**: Plugin properties are auto-namespaced as `:plugin.property.{plugin-id}/{property-name}`
 8. **UUID Auto-generation**: When blocks lack UUIDs, the system auto-generates them during insertion
 9. **Case-Insensitive Tags**: Tag lookup by title is case-insensitive via `ldb/get-case-page`
-10. **Property Schemas on Tags - UI-ONLY** (POC 4):
+10. **Property Schemas on Tags - UI-ONLY**:
     - Property schemas CANNOT be defined programmatically on tag/class pages
     - Requires `:logseq.property.class/properties` with db/id references
     - Plugin API restricts: "Plugins can only upsert its own properties"
     - No API exists to create property definition entities
     - **Workaround**: Use type inference from JavaScript values (recommended approach)
-11. **React Integration Issues** (POC 6):
+11. **React Integration Issues**:
     - **MUST** use `index.html` entry point, not just JS
     - **MUST** use `vite-plugin-logseq` for proper bundling
     - **DO NOT** use React.StrictMode - causes duplicate function calls
@@ -1162,12 +1162,12 @@ This skill is based on official Logseq source code and tests:
 
 **Key Insight**: The test file `plugins_basic_test.clj` shows the INTENDED API, but the `schema` parameter doesn't work in practice with @logseq/libs v0.0.17 due to serialization issues.
 
-## Verified Working Examples (Tested in POC)
+## Complete Working Examples
 
-### Complete Working Example
+### Creating a Page with Multiple Property Types
 
 ```typescript
-// VERIFIED WORKING - POC 1 tested successfully
+// Verified working example with type inference
 const page = await logseq.Editor.createPage(
   'My Article',
   {
@@ -1237,10 +1237,10 @@ const page = await logseq.Editor.createPage(
 
 ## Version Information
 
-- **@logseq/libs**: v0.0.17 (tested with POC)
+- **@logseq/libs**: v0.0.17 (current stable version)
 - **DB Graphs**: Available in Logseq 0.10.0+
 - **Status**: DB graphs are in beta - API may evolve
-- **Schema support**: Documented but broken in current version
+- **Schema support**: Documented but broken in current version - use type inference instead
 
 ## Migration from MD to DB Plugins
 
