@@ -3,15 +3,13 @@ name: logseq-db-plugin-dev
 description: Essential knowledge for developing Logseq plugins for DB (database) graphs. Use this skill when creating or debugging Logseq plugins that work with DB graphs. Claude Code only.
 ---
 
-# Logseq DB Plugin Development
+# Logseq DB Plugin Development Reference
 
-**IMPORTANT**: This skill is for **Logseq DB (database) graphs only**, not markdown/file-based graphs. DB graphs use a fundamentally different architecture.
+**Target**: @logseq/libs v0.2.3 | Logseq 0.11.0+ (DB graphs)
 
-## Overview
+This guide focuses on **DB (database) graphs**, which differ fundamentally from markdown/file-based graphs. Critical differences are highlighted throughout.
 
-Logseq DB graphs are database-backed knowledge graphs that differ significantly from the original markdown-based graphs. Plugins must be specifically designed for DB graphs using the appropriate APIs.
-
-## Basic Plugin Structure
+## Environment Setup
 
 ### Package.json
 ```json
@@ -25,1282 +23,411 @@ Logseq DB graphs are database-backed knowledge graphs that differ significantly 
     "icon": "./icon.svg"
   },
   "dependencies": {
-    "@logseq/libs": "^0.0.17"
+    "@logseq/libs": "^0.2.3"
   },
   "devDependencies": {
     "typescript": "^5.0.0",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "vite-plugin-logseq": "^1.1.2"
   }
 }
 ```
 
-### Basic Plugin Entry Point (src/index.ts)
+### Basic Plugin Entry Point
 ```typescript
 import '@logseq/libs'
 
 async function main() {
   console.log('Plugin loaded')
 
-  // Register slash command
-  logseq.Editor.registerSlashCommand('Example Command', async () => {
+  logseq.Editor.registerSlashCommand('My Command', async () => {
     // Command implementation
-  })
-
-  // Add toolbar button (optional)
-  logseq.provideModel({
-    async exampleAction() {
-      // Action implementation
-    }
-  })
-
-  logseq.App.registerUIItem('toolbar', {
-    key: 'example-plugin',
-    template: `
-      <a data-on-click="exampleAction"
-         class="button"
-         title="Example action">
-        <span>🔧</span>
-      </a>
-    `
   })
 }
 
 logseq.ready(main).catch(console.error)
 ```
 
-## MD Plugin API Reference (Legacy - File-based Graphs)
+## Creating Pages
 
-These APIs work for **markdown/file-based graphs**. DB graphs require different approaches (see DB-specific sections below).
-
-### Creating Pages (MD)
+### MD Graphs (File-based)
 ```typescript
-// Create page with properties (MD graphs)
-const page = await logseq.Editor.createPage(
-  pageName,
-  {
-    property1: 'value1',
-    property2: 'value2'
-  },
-  {
-    redirect: false,
-    createFirstBlock: false
-  }
-)
-```
-
-### Creating Blocks (MD)
-```typescript
-// Append block to page
-const block = await logseq.Editor.appendBlockInPage(
-  pageName,
-  'Block content',
-  {
-    properties: {
-      key: 'value'
-    }
-  }
-)
-
-// Insert nested blocks
-await logseq.Editor.insertBatchBlock(
-  parentBlockUUID,
-  [
-    {
-      content: 'First block',
-      children: [
-        { content: 'Nested block', children: [] }
-      ]
-    },
-    {
-      content: 'Second block',
-      children: []
-    }
-  ]
-)
-```
-
-### Setting Properties (MD)
-```typescript
-// Set property on block/page
-await logseq.Editor.upsertBlockProperty(
-  blockUUID,
-  'propertyName',
-  'value'
-)
-
-// Remove property
-await logseq.Editor.removeBlockProperty(
-  blockUUID,
-  'propertyName'
-)
-
-// Get property
-const value = await logseq.Editor.getBlockProperty(
-  blockUUID,
-  'propertyName'
-)
-
-// Get all properties
-const props = await logseq.Editor.getBlockProperties(blockUUID)
-```
-
-## DB-Specific APIs (Database Graphs)
-
-**CRITICAL**: DB graphs require a fundamentally different approach to creating pages with properties. You MUST pass properties AND schema together at creation time.
-
-### Key Differences from MD Graphs
-
-1. **Pages are Nodes**: In DB graphs, both pages and blocks are nodes with similar behavior
-2. **Typed Properties**: DB graphs support typed properties (text, number, date, datetime, checkbox, url, node, json)
-3. **Schema Required**: When creating pages/blocks with properties, you MUST provide a schema to define property types
-4. **Tags as Classes**: Tags created with `#NAME` syntax can have properties defined on them
-5. **Property Auto-Hide**: Empty properties automatically hide in DB graphs
-6. **Template Auto-Apply**: Templates can auto-apply to pages with specific tags
-
-### Creating Pages with Properties (DB)
-
-**VERIFIED WORKING SYNTAX** (tested and confirmed):
-
-```typescript
-// Create page with typed properties - CORRECT WAY FOR DB GRAPHS
-// DO NOT include schema parameter - it causes serialization errors
+// Simple page creation
 const page = await logseq.Editor.createPage(
   'Page Name',
   {
-    // Properties (values) - types are inferred from JavaScript values
-    title: 'Test Article',           // String
-    year: 2025,                       // Number (use actual number, not string)
-    verified: true,                   // Boolean (use actual boolean)
-    link: 'https://example.com',      // String (will be recognized as URL)
-    categories: ['cat1', 'cat2'],     // Array becomes multi-value set
-    tags: ['tag1', 'tag2'],           // Array becomes multi-value set
-    author: 'Jane Doe'                // String
-  },
-  {
-    redirect: false,
-    createFirstBlock: false
+    property1: 'value1',
+    property2: 'value2'
   }
 )
 ```
 
-**Critical Findings**:
-- ✅ **DO NOT use `schema` parameter** - causes `DataCloneError` (function serialization issue)
-- ✅ **Types are auto-inferred** from JavaScript values:
-  - Number: Use actual number `2025` not string `"2025"`
-  - Boolean: Use actual boolean `true` not string `"true"`
-  - URL: Strings with URLs are recognized automatically
-  - Multi-value: Arrays become sets `["a", "b"]` → `#{"a" "b"}`
-- ✅ **Properties are namespaced**: `:plugin.property.{plugin-name}/{property-name}`
-- ✅ **Empty strings auto-hide** in the UI
-- ⚠️  **Date properties**:
-  - Certain property names (e.g., `created`, `modified`) are auto-detected as date types
-  - Error: `"should be a journal date"` - expects page reference to journal page, not timestamp or string
-  - Both `"YYYY-MM-DD"` strings and Unix timestamps fail validation
-  - **Workaround**: Use different property names (e.g., `dateCreated`, `publicationDate`) or use text type
-  - **Critical**: When a property fails validation, ALL subsequent properties are silently dropped
-- ⚠️  **Page references**: Unknown if possible without schema parameter
+### DB Graphs (Database)
 
-### Tagging Pages (DB)
-
-**CRITICAL**: To add tags to a page in DB graphs, include `#tagname` syntax in the page title. There is NO explicit `addTag()` API.
+**Key Difference**: DB graphs support explicit schema definitions and automatic property namespacing.
 
 ```typescript
-// ✅ CORRECT - Tag in page title
+// Page with explicit schema (v0.2.3+)
 const page = await logseq.Editor.createPage(
-  'My Article #research #science',  // Tags parsed from title
+  'Article Title',
   {
-    title: 'Article Title',
-    year: 2025
+    title: 'My Article',
+    year: 2025,
+    verified: true,
+    url: 'https://example.com'
   },
   {
+    schema: {
+      title: { type: 'string' },
+      year: { type: 'number' },
+      verified: { type: 'checkbox' },
+      url: { type: 'url' }
+    },
     redirect: false,
     createFirstBlock: false
+  } as any  // TypeScript defs not yet updated
+)
+```
+
+**Property Types**:
+- `string` - Text
+- `number` - Numbers
+- `checkbox` - Boolean checkboxes
+- `url` - URLs (validated)
+- `date` - Date values
+- `datetime` - Date with time
+- `page` - Page references
+- `node` - Block references
+
+**Important**:
+- Properties are namespaced as `:plugin.property.{plugin-id}/{property-name}`
+- Use `as any` for schema parameter (TypeScript definitions lag behind runtime API)
+- Schema parameter eliminates DataCloneError from v0.0.17
+
+## Creating Class/Tag Pages
+
+### MD Graphs
+Not applicable - tags are just page references.
+
+### DB Graphs
+
+**Key Difference**: DB graphs have dedicated class/tag pages that can define property schemas for all tagged pages.
+
+```typescript
+// Create a class page with schema (v0.2.3+)
+const tagPage = await logseq.Editor.createPage(
+  'research',  // Class name
+  {},
+  {
+    class: true,
+    schema: {
+      year: { type: 'number' },
+      title: { type: 'string' },
+      verified: { type: 'checkbox' },
+      publicationDate: { type: 'date' }
+    }
+  } as any
+)
+
+// Pages tagged with #research will inherit this schema
+const article = await logseq.Editor.createPage(
+  'Study on XYZ #research',
+  {
+    year: 2025,
+    title: 'XYZ Study',
+    verified: true,
+    publicationDate: '2025-01-15'
   }
 )
-// Result: :block/tags #{"Page" "research" "science"}
+```
 
-// ❌ WRONG - Custom property approach
+**Important**:
+- Class pages get auto-generated ident: `:user.class/research-XXXXXXXX`
+- Schema must be passed during creation - no API to add it later
+- This enables programmatic tag schema setup (major improvement in v0.2.3)
+
+## Adding Tags to Pages
+
+### MD Graphs
+```typescript
+// Tags can be added as page properties or in content
+const page = await logseq.Editor.createPage(
+  'My Page',
+  { tags: ['tag1', 'tag2'] }
+)
+```
+
+### DB Graphs
+
+**Key Difference**: Tags must be included in the page title. No explicit `addTag()` API exists.
+
+```typescript
+// ✅ CORRECT - Tags in page title
+const page = await logseq.Editor.createPage(
+  'My Article #research #science',
+  { year: 2025 }
+)
+
+// ❌ WRONG - No effect in DB graphs
 const page = await logseq.Editor.createPage(
   'My Article',
-  {
-    tags: ['research', 'science']  // Creates :plugin.property.{id}/tags, NOT :block/tags
-  }
+  { tags: ['research', 'science'] }  // Creates custom property, not actual tags
 )
 
-// ❌ WRONG - upsertBlockProperty approach
-await logseq.Editor.upsertBlockProperty(page.uuid, 'tags', ['research'])
-// Still creates :plugin.property.{id}/tags, NOT :block/tags
-// Also throws "Invalid datascript entities" error
-
-// ❌ WRONG - Tag in block content (tags the block, not the page)
-await logseq.Editor.appendBlockInPage('My Article', '#research')
-// Result: Block has tag, but page's :block/tags only has "Page"
+// ❌ WRONG - addTag() method doesn't exist
+await logseq.Editor.addTag(page.uuid, 'research')  // Error: "Not existed method"
 ```
 
-**Key Points**:
-- Tags must be in page title using `#tagname` syntax
-- The `#tag` portion is parsed and removed from the displayed title
-- Tags are stored in `:block/tags` property (not a custom property)
-- Every page automatically has the `Page` tag
-- Custom `tags` properties are NOT the same as `:block/tags`
+## Creating Blocks
 
-### Creating Tag/Class Pages (DB)
-
-Tag/class pages can be created programmatically.
-
+### MD Graphs
 ```typescript
-// Create a tag (class) page
-const tagPage = await logseq.Editor.createPage(
-  'Tag Name',
-  {},
-  // @ts-ignore - class option exists but not in type definitions
-  { class: true }
-)
-// Creates :user.class/tag-name-XXXXXXXX
-```
-
-**Important Notes:**
-- Tag/class pages are created with an auto-generated ident (`:user.class/tag-name-XXXXXXXX`)
-- These are distinct from regular pages - they can have property schemas attached
-- The `class: true` option is not in TypeScript definitions, use `@ts-ignore`
-
-### Property Schemas on Tags (DB) - UI-ONLY ⚠️
-
-**CRITICAL**: Property schemas CANNOT be defined programmatically via plugin API.
-
-**How Logseq stores schemas internally:**
-```clojure
-; Class/tag with schema (UI-created)
-:user.class/my-tag
-{:logseq.property.class/properties [{:db/id 232} {:db/id 233}]}  ; References to property entities
-
-; Property definition entity
-:user.property/year
-{:logseq.property/type :number  ; Keyword type, not string!
- :db/id 232}
-```
-
-**Why plugins can't set schemas:**
-1. `:logseq.property.class/properties` requires **db/id references** to property definition entities
-2. Plugin API restricts: "Plugins can only upsert its own properties"
-3. No API exists to create property definition entities
-4. Property types are **keywords** (`:number`, `:default`), not strings (`"number"`, `"text"`)
-
-**What doesn't work:**
-```typescript
-// ❌ All these approaches FAIL
-await logseq.Editor.upsertBlockProperty(tagPage.uuid, 'logseq.property/schema', {...})
-// Error: "Plugins can only upsert its own properties"
-
-await logseq.Editor.upsertBlockProperty(tagPage.uuid, 'year', 'number')
-// Creates custom property VALUE "number", not a schema
-
-await logseq.Editor.upsertBlockProperty(tagPage.uuid, 'year', { type: 'number' })
-// Creates custom property, not a schema
-```
-
-**Workaround: Use Type Inference (Recommended)**
-
-Since programmatic schema definition isn't possible, use JavaScript value types for automatic type inference:
-
-```typescript
-// ✅ RECOMMENDED - Types inferred from JS values
-const page = await logseq.Editor.createPage(
-  'My Article #zot',  // Include tag in title
-  {
-    title: 'Article Title',          // string → text type
-    year: 2025,                       // number → number type
-    verified: true,                   // boolean → checkbox type
-    url: 'https://example.com',       // string → url type (auto-detected)
-    authors: ['Author 1', 'Author 2'] // array → multi-value text
-  },
-  {
-    redirect: false,
-    createFirstBlock: false
-  }
-)
-```
-
-**Manual Schema Setup (Optional):**
-Users CAN manually create tag/class pages in the Logseq UI and define property schemas, which will apply to all pages with that tag. But plugins cannot do this programmatically.
-
-### Setting Properties on Existing Pages/Blocks
-
-After page creation, you can still use `upsertBlockProperty`:
-
-```typescript
-// Set individual property (type inferred from value)
-await logseq.Editor.upsertBlockProperty(page.uuid, 'title', 'New Title')
-await logseq.Editor.upsertBlockProperty(page.uuid, 'count', 42)
-await logseq.Editor.upsertBlockProperty(page.uuid, 'active', true)
-
-// Set complex property (JSON)
-await logseq.Editor.upsertBlockProperty(page.uuid, 'metadata', {
-  a: 1,
-  b: [2, 3]
-})
-```
-
-### Creating Blocks with Properties (DB)
-
-```typescript
-// Insert block with properties and schema
+// Simple block insertion
 const block = await logseq.Editor.insertBlock(
-  parentPage,
+  parentBlock,
+  'Block content',
+  { sibling: true }
+)
+```
+
+### DB Graphs
+
+**Key Difference**: Blocks in DB graphs have strict UUID requirements and different property handling.
+
+```typescript
+// Single block with properties
+const block = await logseq.Editor.appendBlockInPage(
+  'Page Name',
   'Block content',
   {
     properties: {
-      checked: true,
-      link: 'https://logseq.com',
-      count: 42
-    },
-    schema: {
-      checked: { type: 'checkbox' },
-      link: { type: 'url' },
-      count: { type: 'number' }
+      customProp: 'value'
     }
   }
 )
 
-// Insert batch blocks with properties
-await logseq.Editor.insertBatchBlock(
-  pageUUID,
+// Batch blocks (nested structure)
+const blocks = await logseq.Editor.insertBatchBlock(
+  parentBlock,
   [
     {
-      content: 'First block',
-      properties: {
-        related: 'Page 1',
-        tags: ['Page 2', 'Page 3']
-      }
+      content: 'Parent block',
+      children: [
+        { content: 'Child 1' },
+        { content: 'Child 2' }
+      ]
     }
   ],
-  {
-    schema: {
-      related: { type: 'page' },
-      tags: { type: 'page' }
-    }
-  }
+  { sibling: false }
 )
 ```
 
-### Creating Nested Block Structures (DB)
+**Important**:
+- `properties` parameter in `insertBatchBlock` is **not supported** in DB graphs
+- Use `insertBlock` with `properties` option instead for individual blocks
+- Blocks without UUIDs get auto-generated UUIDs
 
-`insertBatchBlock` works perfectly for creating nested block hierarchies.
+## Property Handling
 
-```typescript
-// ✅ WORKS PERFECTLY - Nested blocks with children array
-await logseq.Editor.insertBatchBlock(parentBlockUUID, [
-  {
-    content: 'Level 1 - First item',
-    children: [
-      {
-        content: 'Level 2 - Nested under first',
-        children: [
-          {
-            content: 'Level 3 - Deeply nested',
-            children: []
-          }
-        ]
-      }
-    ]
-  },
-  {
-    content: 'Level 1 - Second item',
-    children: [
-      {
-        content: 'Level 2 - Another nested item',
-        children: []
-      }
-    ]
-  }
-])
+### Reserved Property Names
 
-// Alternative: Use insertBlock with sibling parameter
-const firstChild = await logseq.Editor.insertBlock(
-  parentBlockUUID,
-  'First child block',
-  { sibling: false }  // Insert as child
-)
+**Both MD and DB**: Avoid these reserved names - they have special validation:
+- `created`
+- `modified`
+- `updated`
 
-if (firstChild) {
-  // Add nested child
-  await logseq.Editor.insertBlock(
-    firstChild.uuid,
-    'Nested under first child',
-    { sibling: false }
-  )
-
-  // Add sibling to first child
-  await logseq.Editor.insertBlock(
-    firstChild.uuid,
-    'Sibling to first child',
-    { sibling: true }
-  )
-}
-```
-
-**Key Points**:
-- No depth limit found (tested 3+ levels)
-- `children` array must always be present (use `[]` for leaf nodes)
-- Both `insertBatchBlock` and `insertBlock` with `sibling` parameter work
-- `insertBatchBlock` is best for creating entire structures at once
-- `insertBlock` with `sibling` is best for incremental additions
-
-**Practical Example - Bibliographic Structure**:
-```typescript
-// Create Zotero-like nested structure
-await logseq.Editor.insertBatchBlock(pageUUID, [
-  {
-    content: '**Abstract:**',
-    children: [
-      {
-        content: htmlToMarkdown(abstract),
-        children: []
-      }
-    ]
-  },
-  {
-    content: '**Authors:**',
-    children: authors.map(author => ({
-      content: author,
-      children: []
-    }))
-  },
-  {
-    content: '**Metadata:**',
-    children: [
-      { content: `Year: ${year}`, children: [] },
-      { content: `Journal: ${journal}`, children: [] }
-    ]
-  }
-])
-```
-
-### HTML to Markdown Conversion
-
-**CRITICAL**: Logseq displays raw HTML tags literally - they are NOT rendered. Convert HTML to Markdown before insertion.
+**Issue in DB graphs (v0.2.3)**:
+- Reserved names don't throw errors anymore
+- BUT they silently drop all subsequent properties
+- Workaround: Use alternative names
 
 ```typescript
-// ✅ RECOMMENDED - Convert HTML to Markdown
-function htmlToMarkdown(html: string): string {
-  return html
-    .replace(/<i>(.*?)<\/i>/g, '*$1*')           // Italic
-    .replace(/<em>(.*?)<\/em>/g, '*$1*')         // Emphasis
-    .replace(/<b>(.*?)<\/b>/g, '**$1**')         // Bold
-    .replace(/<strong>(.*?)<\/strong>/g, '**$1**')  // Strong
-    .replace(/<sup>(.*?)<\/sup>/g, '^$1^')       // Superscript
-    .replace(/<sub>(.*?)<\/sub>/g, '~$1~')       // Subscript
-    .replace(/<a href="(.*?)">(.*?)<\/a>/g, '[$2]($1)')  // Links
-    .replace(/<br\s*\/?>/g, '\n')                // Line breaks
-    .replace(/<\/?p>/g, '\n')                    // Paragraphs
-    .trim()
-}
-
-// Use with Zotero abstracts
-const markdownAbstract = htmlToMarkdown(zoteroItem.abstractNote)
-await logseq.Editor.insertBlock(pageUUID, markdownAbstract)
-
-// ❌ WRONG - Raw HTML shows tags
-await logseq.Editor.insertBlock(pageUUID, '<i>italic text</i>')
-// Displays: <i>italic text</i> (tags visible)
-
-// ❌ WRONG - Stripped HTML loses formatting
-await logseq.Editor.insertBlock(pageUUID, stripHtml('<i>italic text</i>'))
-// Displays: italic text (no emphasis)
-```
-
-**Markdown Rendering Results**:
-- `*text*` → *italic text*
-- `**text**` → **bold text**
-- `^text^` → <sup>superscript</sup>
-- `~text~` → <sub>subscript</sub>
-- `[text](url)` → clickable link
-
-### Property Types (DB)
-
-DB graphs support these property types:
-- **text** (default): String values - no schema needed
-- **number**: Numeric values - `{ type: 'number' }`
-- **date**: Date values (YYYY-MM-DD format, links to journal pages) - `{ type: 'date' }`
-- **datetime**: Date and time values - `{ type: 'datetime' }`
-- **checkbox**: Boolean values - `{ type: 'checkbox' }`
-- **url**: URL values (clickable) - `{ type: 'url' }`
-- **page** / **node**: References to other pages/blocks - `{ type: 'page' }` or `{ type: 'node' }`
-- **json**: Complex objects - `{ type: 'json' }`
-- **string**: Explicit string type - `{ type: 'string' }`
-
-### Schema Syntax
-
-```typescript
-{
-  schema: {
-    propertyName: { type: 'propertyType' }
-  }
-}
-
-// Or shorthand string syntax:
-{
-  schema: {
-    propertyName: 'propertyType'
-  }
-}
-```
-
-### Property Value Validation (DB)
-
-DB graphs validate property values against their schema types:
-
-```typescript
-// ✅ CORRECT - value matches schema type
-await logseq.Editor.createPage('Page',
-  { count: 42 },
-  { schema: { count: { type: 'number' } } }
-)
-
-// ❌ WRONG - value doesn't match schema type
-await logseq.Editor.createPage('Page',
-  { count: "42" },  // String instead of number
-  { schema: { count: { type: 'number' } } }
-)
-// Throws error: "should be a number"
-```
-
-**Validation Error Messages**:
-- `checkbox`: "should be a boolean"
-- `number`: Value must be numeric type
-- `string`: "should be a string"
-- `json`: "should be JSON string"
-- `url`: "should be a URL"
-- Reference properties validate after entity lookup
-
-**Important**: Validation happens BEFORE database transaction, preventing invalid data from being persisted.
-
-### Multi-value Properties (DB)
-
-Arrays create multi-value properties:
-
-```typescript
-// Multi-value text (queryable, not page references)
+// ❌ PROBLEMATIC - Drops 'title' property
 const page = await logseq.Editor.createPage(
-  'Article',
+  'My Page',
   {
-    keywords: ['database', 'knowledge-graph', 'note-taking']
-    // No schema needed - defaults to text type
+    created: '2025-01-15',
+    title: 'Will be dropped'  // This gets lost
   }
 )
 
-// Multi-value page references
+// ✅ SAFE - Use alternative names
 const page = await logseq.Editor.createPage(
-  'Article',
+  'My Page',
   {
-    relatedPages: ['Page 1', 'Page 2', 'Page 3']
-  },
-  {
-    schema: {
-      relatedPages: { type: 'page' }  // Makes them clickable page links
-    }
+    dateCreated: '2025-01-15',
+    publicationDate: '2025-01-15',
+    title: 'Works correctly'
   }
 )
 ```
 
-### Query APIs (DB)
+### Property Namespacing
 
-New APIs for querying DB graphs:
+**MD Graphs**: Properties stored as-is in frontmatter.
+
+**DB Graphs**: Plugin properties are automatically namespaced.
 
 ```typescript
-// Get all tags (classes) in the database
-const tags = await logseq.DB.getAllTags()
+// Plugin creates this property:
+{ title: 'My Article' }
 
-// Get all properties defined in the database
-const properties = await logseq.DB.getAllProperties()
-
-// Get objects tagged with a specific class/tag
-// Accepts: UUID string, db/ident, or tag title (case-insensitive)
-const objects = await logseq.DB.getTagObjects('tag-uuid')
-const objects = await logseq.DB.getTagObjects('Tag Name')  // Case-insensitive
+// Stored in DB as:
+:plugin.property.my-plugin-id/title "My Article"
 ```
 
-**Important**: `getTagObjects` validates that the input resolves to an actual tag/class and throws an error if it doesn't.
+**Important**: This prevents conflicts but means you can't modify Logseq's built-in properties like `:block/tags`.
 
-## Common Patterns
+## Querying Data
 
-### Error Handling
+### MD Graphs
+Query markdown files directly or use Datalog on file-based database.
+
+### DB Graphs
+
+**Key Difference**: Must use Datalog queries against the database.
+
 ```typescript
-try {
-  const page = await logseq.Editor.createPage(pageName)
-  if (!page) {
-    throw new Error('Page creation returned null')
-  }
-  // ... rest of logic
-} catch (error) {
-  console.error('Plugin error:', error)
-  logseq.UI.showMsg(
-    `Error: ${error instanceof Error ? error.message : String(error)}`,
-    'error'
-  )
-}
+// Find pages by property value
+const results = await logseq.DB.q(`
+  [:find (pull ?b [*])
+   :where
+   [?b :plugin.property.my-plugin/doi "${doi}"]]
+`)
+
+// Check if page exists
+const existing = await logseq.DB.q(`
+  [:find (pull ?b [*])
+   :where
+   [?b :block/original-name ?name]
+   [(= ?name "${pageName}")]]
+`)
 ```
 
-### User Notifications
+**Important**:
+- Use `:block/original-name` for case-sensitive page name lookups
+- Property queries must use full namespaced property name
+- Results are arrays of arrays: `[[{page1}], [{page2}]]`
+
+## Handling HTML Content
+
+### MD Graphs
+Can insert HTML directly into markdown.
+
+### DB Graphs
+
+**Key Difference**: HTML must be converted to markdown first.
+
 ```typescript
-// Info message
-logseq.UI.showMsg('Operation in progress...', 'info')
+import TurndownService from 'turndown'
 
-// Success message
-logseq.UI.showMsg('Operation completed!', 'success', { timeout: 5000 })
-
-// Error message
-logseq.UI.showMsg('Operation failed!', 'error', { timeout: 5000 })
-
-// Warning message
-logseq.UI.showMsg('Warning: check your settings', 'warning')
-```
-
-### Navigation
-```typescript
-// Navigate to a page
-logseq.App.pushState('page', { name: pageName })
-
-// Navigate to a block
-logseq.App.pushState('block', { uuid: blockUUID })
-```
-
-## Build Configuration
-
-### vite.config.ts
-```typescript
-import { defineConfig } from 'vite'
-
-export default defineConfig({
-  build: {
-    target: 'esnext',
-    minify: 'esbuild',
-    rollupOptions: {
-      external: ['@logseq/libs']
-    }
-  }
+const turndownService = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced'
 })
+
+// Convert HTML to markdown
+const markdown = turndownService.turndown(htmlContent)
+
+const block = await logseq.Editor.appendBlockInPage(
+  pageName,
+  markdown
+)
 ```
 
-### tsconfig.json
-```json
-{
-  "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": ["ESNext", "DOM"],
-    "moduleResolution": "node",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*"]
+## Duplicate Detection
+
+### MD Graphs
+Check for existing files.
+
+### DB Graphs
+
+**Key Difference**: Query by unique property, not page title.
+
+```typescript
+// ❌ UNRELIABLE - Page titles can change
+const existing = await logseq.Editor.getPage(pageName)
+
+// ✅ RELIABLE - Query by unique property (DOI, URL, etc.)
+const results = await logseq.DB.q(`
+  [:find (pull ?b [*])
+   :where
+   [?b :plugin.property.my-plugin/doi "${doi}"]]
+`)
+
+if (results && results.length > 0) {
+  console.log('Page already exists')
 }
 ```
 
-## Testing & Development
+## Testing in Browser Console
 
-### Build Commands
-```bash
-# Install dependencies
-pnpm install
-
-# Build plugin
-pnpm build
-
-# Development mode (if configured)
-pnpm dev
-```
-
-### Loading in Logseq
-1. Open Logseq
-2. Settings → Plugins → Load unpacked plugin
-3. Select plugin directory
-4. Plugin will appear in toolbar and slash commands
-
-### Debugging
-- Use browser DevTools (Cmd+Opt+I on Mac)
-- Check console for errors and logs
-- Use `console.log()` for debugging
-- Check Logseq's plugin console for errors
-
-### Exposing Functions to Browser Console
-
-**Problem**: Logseq plugins run in an iframe context, so setting functions on `window` doesn't make them accessible from the browser console.
-
-**Solution**: Expose functions to parent and top windows:
+Plugins run in iframes. To test functions from browser console:
 
 ```typescript
-async function main() {
-  // Your plugin code...
-
-  // Expose functions for console access
+// In your plugin code - expose to parent window
+if (typeof parent !== 'undefined' && parent.window) {
   // @ts-ignore
-  globalThis.myFunction = myFunction
-
-  // For iframe context (Logseq plugins)
-  // @ts-ignore
-  if (typeof parent !== 'undefined' && parent.window) {
-    // @ts-ignore
-    parent.window.myFunction = myFunction
-  }
-
-  // @ts-ignore
-  if (typeof top !== 'undefined' && top.window && top !== window) {
-    // @ts-ignore
-    top.window.myFunction = myFunction
-  }
-}
-```
-
-**Usage**: Now you can call from browser console:
-```javascript
-await window.myFunction()
-```
-
-**Note**: This is useful for development and testing. Production plugins should use proper UI instead of console commands.
-
-### Checking for Duplicates
-
-**Best Practice**: Query by unique identifier property, not by page title.
-
-```typescript
-// ✅ BEST: Query by unique property
-async function checkIfExists(zoteroKey: string): Promise<boolean> {
-  try {
-    // Query database for pages with this property
-    const query = `(property zoteroKey "${zoteroKey}")`
-    const results = await logseq.DB.q(query)
-    return !!(results && results.length > 0)
-  } catch (error) {
-    console.warn('Query failed:', error)
-    return false
+  parent.window.myTestFunction = async function() {
+    // Test code here
   }
 }
 
-// ❌ AVOID: Title-based checking (false positives)
-async function checkIfExistsByTitle(title: string): Promise<boolean> {
-  const page = await logseq.Editor.getPage(title)
-  return !!page
-}
+// In browser console
+await window.myTestFunction()
 ```
 
-**Why query by property?**
-- Most reliable: unique identifiers prevent false positives
-- Works even if page title is modified
-- Handles duplicate titles correctly
-
-**Common use cases**:
-- Zotero import: check by `zoteroKey`
-- External IDs: check by `externalId`, `doi`, `isbn`, etc.
-- Any unique identifier property
-
-## React Integration
-
-**CRITICAL**: Logseq plugins with React UIs require a specific setup pattern to work correctly.
-
-### Required Setup
-
-**1. HTML Entry Point Required**
-
-Logseq expects an `index.html` file, not just a JavaScript entry point:
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Plugin Name</title>
-</head>
-<body>
-  <div id="app"></div>  <!-- Logseq provides this container -->
-  <script src="src/index.tsx" type="module"></script>
-</body>
-</html>
-```
-
-**2. Package.json Configuration**
-
-```json
-{
-  "logseq": {
-    "id": "plugin-id",
-    "title": "Plugin Title",
-    "icon": "./icon.svg",
-    "main": "dist/index.html"  // CRITICAL: Point to HTML not JS
-  },
-  "dependencies": {
-    "@logseq/libs": "^0.0.17",
-    "@mantine/core": "^7.0.0",  // Optional UI library
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
-  },
-  "devDependencies": {
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "@vitejs/plugin-react": "^4.0.0",
-    "vite-plugin-logseq": "^1.1.2"  // CRITICAL for proper bundling
-  }
-}
-```
-
-**3. Vite Configuration - Use vite-plugin-logseq**
-
-```typescript
-import { defineConfig } from 'vite'
-import logseqDevPlugin from 'vite-plugin-logseq'
-
-export default defineConfig({
-  plugins: [logseqDevPlugin()],  // Handles React, externals, paths automatically
-})
-```
-
-**Why vite-plugin-logseq?**
-- Automatically handles `@logseq/libs` as external
-- Configures React plugin correctly
-- Sets up relative asset paths (`./assets/...` not `/assets/...`)
-- Handles all Logseq-specific bundling requirements
-
-**4. TypeScript Configuration**
-
-```json
-{
-  "compilerOptions": {
-    "jsx": "react-jsx",  // CRITICAL: Enable JSX support
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": ["ESNext", "DOM"],
-    "moduleResolution": "node",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*"]
-}
-```
-
-### React Root Pattern
-
-**CRITICAL**: Create React root ONCE at plugin load, render on demand.
-
-```typescript
-import React from 'react'
-import { createRoot } from 'react-dom/client'
-import { MantineProvider } from '@mantine/core'
-import '@mantine/core/styles.css'
-import { SearchUI } from './SearchUI'
-
-const main = async () => {
-  // Get the app div that Logseq provides via HTML
-  const el = document.getElementById('app')
-  if (!el) {
-    console.error('App element not found')
-    return
-  }
-
-  // ✅ CORRECT: Create root ONCE at plugin load
-  const root = createRoot(el)
-
-  // Register slash command
-  logseq.Editor.registerSlashCommand('Open UI', async () => {
-    // Render UI when command invoked (NOT StrictMode - see below)
-    root.render(
-      <MantineProvider>
-        <div style={{ /* modal backdrop styles */ }}>
-          <SearchUI onAction={handleAction} />
-        </div>
-      </MantineProvider>
-    )
-    logseq.showMainUI()
-  })
-
-  // Toolbar button
-  logseq.provideModel({
-    async showUI() {
-      root.render(/* same as above */)
-      logseq.showMainUI()
-    }
-  })
-
-  logseq.App.registerUIItem('toolbar', {
-    key: 'plugin-button',
-    template: `
-      <a data-on-click="showUI" class="button" title="Open Plugin">
-        <span>🔍</span>
-      </a>
-    `
-  })
-}
-
-logseq.ready(main).catch(console.error)
-```
-
-**Why this pattern?**
-- ❌ **DON'T** create new root on each UI show - causes crashes
-- ✅ **DO** create root once, call `root.render()` multiple times
-- Matches official Logseq plugin patterns
-
-### React.StrictMode Warning
-
-**CRITICAL BUG FIX**: DO NOT use React.StrictMode in Logseq plugins.
-
-```typescript
-// ❌ WRONG - Causes duplicate function calls
-root.render(
-  <React.StrictMode>
-    <MyComponent />
-  </React.StrictMode>
-)
-
-// ✅ CORRECT - No StrictMode
-root.render(
-  <MantineProvider>
-    <MyComponent />
-  </MantineProvider>
-)
-```
-
-**Why?**
-- React.StrictMode intentionally double-invokes functions in development
-- This causes duplicate API calls, duplicate data operations, duplicate UI updates
-- In testing, this caused operations to run multiple times (StrictMode 2x + other factors = 3x)
-- **Solution**: Remove StrictMode from plugin code
-
-### Preventing Duplicate Function Calls
-
-**Problem**: Even without StrictMode, async operations can be called multiple times due to React re-renders or event handler issues.
-
-**Solution**: Use a global lock for critical operations.
-
-```typescript
-// Global lock to prevent concurrent operations
-const operationLock = new Set<string>()
-
-async function criticalOperation(itemId: string): Promise<void> {
-  // Guard: check if already running
-  if (operationLock.has(itemId)) {
-    console.log(`[GUARD] Already processing ${itemId}, aborting`)
-    return
-  }
-
-  try {
-    // Acquire lock
-    operationLock.add(itemId)
-    console.log(`[OPERATION START] ${itemId}`)
-
-    // Do the actual work
-    await doWork(itemId)
-
-    console.log(`[OPERATION SUCCESS] ${itemId}`)
-  } catch (error) {
-    console.error(`[OPERATION ERROR] ${itemId}:`, error)
-  } finally {
-    // Always release lock
-    operationLock.delete(itemId)
-    console.log(`[OPERATION END] ${itemId}`)
-  }
-}
-```
-
-**Why global lock?**
-- React component state locks only protect within component
-- Parent function calls need protection at function level
-- Global Set ensures no concurrent calls across all contexts
-
-### Common React Integration Errors
-
-**Error 1: Blank Screen / App Crash**
-```
-Cause: Missing index.html or trying to use ReactDOM.createRoot() without proper DOM element
-Fix: Create index.html with <div id="app"></div>, ensure package.json points to it
-```
-
-**Error 2: Asset Loading Failure**
-```
-Error: GET file:///assets/index-xxx.css net::ERR_FILE_NOT_FOUND
-Cause: Vite generating absolute paths /assets/... instead of relative ./assets/...
-Fix: Use vite-plugin-logseq which handles this automatically
-```
-
-**Error 3: Module Specifier Error**
-```
-Error: Failed to resolve module specifier "@logseq/libs"
-Cause: @logseq/libs not properly marked as external
-Fix: Use vite-plugin-logseq which handles externals automatically
-```
-
-**Error 4: JSX Not Recognized**
-```
-Error: TS17004: Cannot use JSX unless the '--jsx' flag is provided
-Cause: Missing jsx configuration in tsconfig.json
-Fix: Add "jsx": "react-jsx" to compilerOptions
-```
-
-**Error 5: Duplicate Operations (Triple Import Bug)**
-```
-Symptoms: Same operation happens 2-3 times (e.g., triple alerts, triple data)
-Cause: React.StrictMode double-rendering + lack of operation lock
-Fix:
-  1. Remove React.StrictMode from render calls
-  2. Add global lock using Set for critical operations
-  3. Add detailed console logging to track execution flow
-```
-
-### React UI Best Practices
-
-**1. Component State for UI, Global Lock for Operations**
-
-```typescript
-// In React component - UI state
-const [importing, setImporting] = useState<string | null>(null)
-
-const handleImport = async (item: Item) => {
-  if (importing === item.key) return  // UI-level guard
-
-  try {
-    setImporting(item.key)  // Show UI feedback
-    await importItem(item)  // Calls function with global lock
-  } finally {
-    setImporting(null)
-  }
-}
-
-// In main index.tsx - global operation lock
-const importingItems = new Set<string>()
-
-async function importItem(item: Item) {
-  if (importingItems.has(item.key)) return  // Global guard
-  // ... rest of implementation
-}
-```
-
-**2. Visual Feedback During Operations**
-
-```typescript
-const isImporting = importing === item.key
-
-<div
-  style={{
-    pointerEvents: isImporting ? 'none' : 'auto',  // Disable clicks
-    opacity: isImporting ? 0.6 : 1
-  }}
-  onClick={() => !isImporting && handleAction(item)}
->
-  <Badge color={isImporting ? 'blue' : 'green'}>
-    {isImporting ? 'Processing...' : 'Click to process'}
-  </Badge>
-</div>
-```
-
-**3. Detailed Logging for Debugging**
-
-```typescript
-console.log(`[GUARD] Already importing ${key}, aborting`)
-console.log(`[IMPORT START] ${key}`)
-console.log(`[IMPORT SUCCESS] ${key}`)
-console.log(`[IMPORT ERROR] ${key}:`, error)
-console.log(`[IMPORT END] ${key}`)
-```
-
-Use clear tag prefixes ([GUARD], [START], [SUCCESS], [ERROR], [END]) to track execution flow.
-
-## Resources
-
-- Official Plugin API: https://logseq.github.io/plugins/
-- Plugin Samples: https://github.com/logseq/logseq-plugin-samples
-- @logseq/libs documentation: https://logseq.github.io/plugins/
-- Community plugins: https://github.com/logseq/marketplace
-- vite-plugin-logseq: https://github.com/pengx17/logseq-plugin-template-react
-
-## Known Issues & Gotchas
-
-1. **MD vs DB**: Plugins designed for markdown graphs may not work correctly with DB graphs
-2. **Schema Parameter Broken**: The `schema` parameter in `createPage` causes `DataCloneError: function could not be cloned` - DO NOT USE in @logseq/libs v0.0.17
-3. **Type Inference**: Types are auto-inferred from JavaScript values - use actual numbers/booleans, not strings
-4. **Silent Property Dropping**: When a property fails validation, ALL subsequent properties in the object are silently dropped - always check console for validation errors
-5. **Reserved Property Names**: Properties named `created`, `modified`, etc. trigger special validation rules (e.g., "should be a journal date")
-6. **Date Properties**:
-   - Reserved names like `created`/`modified` expect "journal date" format (page references)
-   - Both `"YYYY-MM-DD"` strings and Unix timestamps fail validation
-   - **Workaround**: Use different names (`dateCreated`, `publicationDate`) or store as text
-7. **Property Namespacing**: Plugin properties are auto-namespaced as `:plugin.property.{plugin-id}/{property-name}`
-8. **UUID Auto-generation**: When blocks lack UUIDs, the system auto-generates them during insertion
-9. **Case-Insensitive Tags**: Tag lookup by title is case-insensitive via `ldb/get-case-page`
-10. **Property Schemas on Tags - UI-ONLY**:
-    - Property schemas CANNOT be defined programmatically on tag/class pages
-    - Requires `:logseq.property.class/properties` with db/id references
-    - Plugin API restricts: "Plugins can only upsert its own properties"
-    - No API exists to create property definition entities
-    - **Workaround**: Use type inference from JavaScript values (recommended approach)
-11. **React Integration Issues**:
-    - **MUST** use `index.html` entry point, not just JS
-    - **MUST** use `vite-plugin-logseq` for proper bundling
-    - **DO NOT** use React.StrictMode - causes duplicate function calls
-    - **Create React root ONCE** at plugin load, not on each UI show
-    - Use global locks (Set) for async operations to prevent duplicates
-    - Asset paths must be relative (`./assets/`) not absolute (`/assets/`)
-
-## References
-
-This skill is based on official Logseq source code and tests:
-
-**Primary Sources**:
-1. Plugin API test file: `https://github.com/logseq/logseq/blob/master/clj-e2e/test/logseq/e2e/plugins_basic_test.clj`
-   - Contains working examples of createPage, insertBlock, insertBatchBlock with schema
-2. DB Graph API commit: `https://github.com/logseq/logseq/commit/4800ed2`
-   - Added getAllTags, getAllProperties, getTagObjects APIs
-3. ClojureScript SDK commit: `https://github.com/logseq/logseq/commit/d8809f0`
-   - Added ClojureScript wrappers for plugin SDK
-4. API refactoring commit: `https://github.com/logseq/logseq/commit/15de4a8`
-   - Separated API into namespace modules, clarified property/schema structure
-5. Tag objects enhancement: `https://github.com/logseq/logseq/commit/3962f1f`
-   - Enhanced getTagObjects to accept UUID, ident, or title
-6. Property validation commit: `https://github.com/logseq/logseq/commit/dbd15f7`
-   - Added pre-validation for property values with readable error messages
-7. DB version documentation: `https://github.com/logseq/docs/blob/master/db-version-changes.md`
-   - Official documentation about DB graph differences
-
-**Key Insight**: The test file `plugins_basic_test.clj` shows the INTENDED API, but the `schema` parameter doesn't work in practice with @logseq/libs v0.0.17 due to serialization issues.
-
-## Complete Working Examples
-
-### Creating a Page with Multiple Property Types
-
-```typescript
-// Verified working example with type inference
-const page = await logseq.Editor.createPage(
-  'My Article',
-  {
-    // Text properties (default type)
-    title: 'Article Title',
-    description: 'Description text',
-    author1: 'Jane Doe',
-    author2: 'John Smith',
-
-    // Number property (actual number, not string)
-    year: 2025,
-
-    // Boolean property (actual boolean)
-    verified: true,
-
-    // URL property (auto-detected from string)
-    link: 'https://example.com',
-
-    // Multi-value properties (arrays become sets)
-    tags: ['research', 'science', 'database'],
-    categories: ['academic', 'published'],
-
-    // Empty string (auto-hides in UI)
-    notes: ''
-  },
-  {
-    redirect: false,
-    createFirstBlock: false
-  }
-)
-
-// Result: All properties created with correct types
-// - year: 2025 (number)
-// - verified: true (boolean)
-// - tags: #{"research" "science" "database"} (set)
-// - Properties namespaced: :plugin.property.{plugin-id}/propertyName
-```
-
-### What NOT to Do
-
-```typescript
-// ❌ WRONG - Using schema parameter
-const page = await logseq.Editor.createPage(
-  'Page',
-  { year: 2025 },
-  { schema: { year: { type: 'number' } } }  // Causes DataCloneError
-)
-
-// ❌ WRONG - Using reserved property names for dates
-const page = await logseq.Editor.createPage(
-  'Page',
-  {
-    created: '2025-11-01',  // Fails validation, drops ALL subsequent properties
-    title: 'Will be lost'   // Never created due to validation failure above
-  }
-)
-
-// ❌ WRONG - Using strings for numbers/booleans
-const page = await logseq.Editor.createPage(
-  'Page',
-  {
-    year: '2025',      // String, not number
-    verified: 'true'   // String, not boolean
-  }
-)
-```
-
-## Version Information
-
-- **@logseq/libs**: v0.0.17 (current stable version)
-- **DB Graphs**: Available in Logseq 0.10.0+
-- **Status**: DB graphs are in beta - API may evolve
-- **Schema support**: Documented but broken in current version - use type inference instead
-
-## Migration from MD to DB Plugins
-
-If migrating an existing markdown-based plugin to DB graphs:
-
-1. **Update createPage calls**: Add schema parameter for typed properties
-2. **Update insertBlock calls**: Add schema parameter for block properties
-3. **Update insertBatchBlock calls**: Add schema parameter to options object
-4. **Test thoroughly**: MD-style syntax may appear to work but creates incorrect property structure
-5. **Check property types**: Ensure numeric, boolean, URL, and page reference properties have correct schema declarations
-
-**Common Migration Issues**:
-- Properties appearing in page title instead of property section → Testing on MD graph instead of DB graph
-- Properties showing as text when they should be numbers/booleans → Using string values instead of actual JavaScript types
-- All properties missing after first one → Property validation failure causing silent dropping
-- DataCloneError on createPage → Using schema parameter (broken in v0.0.17)
-- Empty properties not auto-hiding → May indicate MD-style properties instead of DB-style
-
-## Summary
-
-**For DB Graph Plugin Development (as of @logseq/libs v0.0.17)**:
-
-✅ **Works**:
-- Creating pages with properties (without schema)
-- Auto-type inference from JavaScript values
-- Number, boolean, URL, text, multi-value array properties
-- Property auto-namespacing
-- Empty property auto-hiding
-- Creating tag/class pages with `{ class: true }`
-- Tagging pages via `#tag` in page title
-- Nested block structures with `insertBatchBlock`
-- HTML to Markdown conversion
-- Database queries with `logseq.DB.q()` for duplicate detection
-- Exposing functions to browser console via parent/top window
-- React UI integration with proper setup (index.html + vite-plugin-logseq)
-- React root pattern (create once, render multiple times)
-
-❌ **Broken/Issues**:
-- Schema parameter causes DataCloneError
-- Date properties with reserved names fail validation
-- Property validation failures silently drop all subsequent properties
-- No way to create page references without schema
-- **Property schemas on tags - UI-only, no plugin API**
-- React.StrictMode causes duplicate function calls - must be avoided
-
-**Best Practices**:
-1. Use actual JavaScript types (numbers, booleans) not strings
-2. Avoid reserved property names (`created`, `modified`)
-3. Test on actual DB graphs, not MD graphs
-4. Check browser console for validation errors
-5. Put most important properties first (validation failures drop subsequent ones)
-6. **Use type inference instead of attempting schema definition**
-7. Include tags in page title using `#tag` syntax
-8. Convert HTML to Markdown for proper formatting
-9. **Check for duplicates using `logseq.DB.q()` with unique property, not page title**
-10. **Expose test functions to parent/top window for iframe context**
-11. **For React plugins**:
-    - Use `index.html` entry point with `<div id="app"></div>`
-    - Use `vite-plugin-logseq` for bundling
-    - Create React root once at plugin load
-    - Never use React.StrictMode
-    - Use global locks (Set) for async operations to prevent duplicates
-    - Add detailed logging with [TAG] prefixes for debugging
+## Common Gotchas
+
+### DB Graphs Specific
+
+1. **Tags must be in page title** - No `addTag()` API
+2. **Properties auto-namespaced** - Can't modify `:block/tags` directly
+3. **Reserved names drop subsequent properties** - Use alternative names
+4. **HTML must be converted to markdown** - Use Turndown
+5. **Schema must be set at creation** - No API to add later
+6. **TypeScript defs lag behind** - Use `as any` for schema parameters
+7. **Query by unique properties** - Not by page titles
+
+### Both MD and DB
+
+1. **React StrictMode causes double execution** - Avoid if possible
+2. **Empty properties auto-hidden** - Set to `null` or `""` to preserve
+3. **Case-insensitive tag lookup** - `#Tag` and `#tag` are the same
+
+## API Differences Summary
+
+| Feature | MD Graphs | DB Graphs |
+|---------|-----------|-----------|
+| Page creation | Simple properties | Schema-based with types |
+| Property storage | Frontmatter | Namespaced database entities |
+| Tags | Property or content | Must be in page title |
+| HTML content | Direct insertion | Convert to markdown |
+| Duplicate detection | By filename | By unique property query |
+| Class pages | Not applicable | Schema inheritance support |
+| Block properties | Frontmatter | Database properties |
+
+## Known Limitations (v0.2.3)
+
+1. **No tag insertion API** - Must use `#tag` in title
+2. **Reserved date properties partially broken** - Drop subsequent properties
+3. **No schema modification API** - Must set during creation
+4. **TypeScript definitions incomplete** - `schema` and `class` parameters not defined
+
+## Requirements
+
+- **Logseq**: 0.11.0+ (for DB graphs)
+- **@logseq/libs**: 0.2.3+
+- **Build tool**: vite-plugin-logseq recommended
+- **Testing**: Must test on actual DB graphs, not MD graphs
+
+## Best Practices
+
+1. Always pass schema parameter for clarity and type safety
+2. Use alternative names for date properties (avoid `created`, `modified`)
+3. Include tags in page title using `#tag` syntax
+4. Convert HTML to markdown using Turndown
+5. Query by unique properties (DOI, URL) for duplicate detection
+6. Put critical properties first (validation failures drop subsequent ones)
+7. Expose test functions to parent window for console testing
+8. Use `as any` for schema parameters until TypeScript defs are updated
