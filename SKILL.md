@@ -314,6 +314,139 @@ await logseq.Editor.insertBatchBlock(
 )
 ```
 
+### Creating Nested Block Structures (DB)
+
+**VERIFIED WORKING** (tested in POC 3): `insertBatchBlock` works perfectly for creating nested block hierarchies.
+
+```typescript
+// ✅ WORKS PERFECTLY - Nested blocks with children array
+await logseq.Editor.insertBatchBlock(parentBlockUUID, [
+  {
+    content: 'Level 1 - First item',
+    children: [
+      {
+        content: 'Level 2 - Nested under first',
+        children: [
+          {
+            content: 'Level 3 - Deeply nested',
+            children: []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    content: 'Level 1 - Second item',
+    children: [
+      {
+        content: 'Level 2 - Another nested item',
+        children: []
+      }
+    ]
+  }
+])
+
+// Alternative: Use insertBlock with sibling parameter
+const firstChild = await logseq.Editor.insertBlock(
+  parentBlockUUID,
+  'First child block',
+  { sibling: false }  // Insert as child
+)
+
+if (firstChild) {
+  // Add nested child
+  await logseq.Editor.insertBlock(
+    firstChild.uuid,
+    'Nested under first child',
+    { sibling: false }
+  )
+
+  // Add sibling to first child
+  await logseq.Editor.insertBlock(
+    firstChild.uuid,
+    'Sibling to first child',
+    { sibling: true }
+  )
+}
+```
+
+**Key Points**:
+- No depth limit found (tested 3+ levels)
+- `children` array must always be present (use `[]` for leaf nodes)
+- Both `insertBatchBlock` and `insertBlock` with `sibling` parameter work
+- `insertBatchBlock` is best for creating entire structures at once
+- `insertBlock` with `sibling` is best for incremental additions
+
+**Practical Example - Bibliographic Structure**:
+```typescript
+// Create Zotero-like nested structure
+await logseq.Editor.insertBatchBlock(pageUUID, [
+  {
+    content: '**Abstract:**',
+    children: [
+      {
+        content: htmlToMarkdown(abstract),
+        children: []
+      }
+    ]
+  },
+  {
+    content: '**Authors:**',
+    children: authors.map(author => ({
+      content: author,
+      children: []
+    }))
+  },
+  {
+    content: '**Metadata:**',
+    children: [
+      { content: `Year: ${year}`, children: [] },
+      { content: `Journal: ${journal}`, children: [] }
+    ]
+  }
+])
+```
+
+### HTML to Markdown Conversion
+
+**CRITICAL**: Logseq displays raw HTML tags literally - they are NOT rendered. Convert HTML to Markdown before insertion.
+
+```typescript
+// ✅ RECOMMENDED - Convert HTML to Markdown
+function htmlToMarkdown(html: string): string {
+  return html
+    .replace(/<i>(.*?)<\/i>/g, '*$1*')           // Italic
+    .replace(/<em>(.*?)<\/em>/g, '*$1*')         // Emphasis
+    .replace(/<b>(.*?)<\/b>/g, '**$1**')         // Bold
+    .replace(/<strong>(.*?)<\/strong>/g, '**$1**')  // Strong
+    .replace(/<sup>(.*?)<\/sup>/g, '^$1^')       // Superscript
+    .replace(/<sub>(.*?)<\/sub>/g, '~$1~')       // Subscript
+    .replace(/<a href="(.*?)">(.*?)<\/a>/g, '[$2]($1)')  // Links
+    .replace(/<br\s*\/?>/g, '\n')                // Line breaks
+    .replace(/<\/?p>/g, '\n')                    // Paragraphs
+    .trim()
+}
+
+// Use with Zotero abstracts
+const markdownAbstract = htmlToMarkdown(zoteroItem.abstractNote)
+await logseq.Editor.insertBlock(pageUUID, markdownAbstract)
+
+// ❌ WRONG - Raw HTML shows tags
+await logseq.Editor.insertBlock(pageUUID, '<i>italic text</i>')
+// Displays: <i>italic text</i> (tags visible)
+
+// ❌ WRONG - Stripped HTML loses formatting
+await logseq.Editor.insertBlock(pageUUID, stripHtml('<i>italic text</i>'))
+// Displays: italic text (no emphasis)
+```
+
+**Markdown Rendering Results**:
+- `*text*` → *italic text*
+- `**text**` → **bold text**
+- `^text^` → <sup>superscript</sup>
+- `~text~` → <sub>subscript</sub>
+- `[text](url)` → clickable link
+
 ### Property Types (DB)
 
 DB graphs support these property types:
