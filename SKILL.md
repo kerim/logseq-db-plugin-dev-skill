@@ -246,14 +246,83 @@ await logseq.Editor.appendBlockInPage('My Article', '#research')
 
 ### Creating Tag/Class Pages (DB)
 
+**VERIFIED WORKING** (tested in POC 4): Tag/class pages can be created programmatically.
+
 ```typescript
 // Create a tag (class) page
 const tagPage = await logseq.Editor.createPage(
   'Tag Name',
   {},
+  // @ts-ignore - class option exists but not in type definitions
   { class: true }
 )
+// Creates :user.class/tag-name-XXXXXXXX
 ```
+
+**Important Notes:**
+- Tag/class pages are created with an auto-generated ident (`:user.class/tag-name-XXXXXXXX`)
+- These are distinct from regular pages - they can have property schemas attached
+- The `class: true` option is not in TypeScript definitions, use `@ts-ignore`
+
+### Property Schemas on Tags (DB) - UI-ONLY ⚠️
+
+**CRITICAL FINDING** (POC 4): Property schemas CANNOT be defined programmatically via plugin API.
+
+**How Logseq stores schemas internally:**
+```clojure
+; Class/tag with schema (UI-created)
+:user.class/my-tag
+{:logseq.property.class/properties [{:db/id 232} {:db/id 233}]}  ; References to property entities
+
+; Property definition entity
+:user.property/year
+{:logseq.property/type :number  ; Keyword type, not string!
+ :db/id 232}
+```
+
+**Why plugins can't set schemas:**
+1. `:logseq.property.class/properties` requires **db/id references** to property definition entities
+2. Plugin API restricts: "Plugins can only upsert its own properties"
+3. No API exists to create property definition entities
+4. Property types are **keywords** (`:number`, `:default`), not strings (`"number"`, `"text"`)
+
+**What doesn't work:**
+```typescript
+// ❌ All these approaches FAIL
+await logseq.Editor.upsertBlockProperty(tagPage.uuid, 'logseq.property/schema', {...})
+// Error: "Plugins can only upsert its own properties"
+
+await logseq.Editor.upsertBlockProperty(tagPage.uuid, 'year', 'number')
+// Creates custom property VALUE "number", not a schema
+
+await logseq.Editor.upsertBlockProperty(tagPage.uuid, 'year', { type: 'number' })
+// Creates custom property, not a schema
+```
+
+**Workaround: Use Type Inference (Recommended)**
+
+Since programmatic schema definition isn't possible, use JavaScript value types for automatic type inference:
+
+```typescript
+// ✅ RECOMMENDED - Types inferred from JS values
+const page = await logseq.Editor.createPage(
+  'My Article #zot',  // Include tag in title
+  {
+    title: 'Article Title',          // string → text type
+    year: 2025,                       // number → number type
+    verified: true,                   // boolean → checkbox type
+    url: 'https://example.com',       // string → url type (auto-detected)
+    authors: ['Author 1', 'Author 2'] // array → multi-value text
+  },
+  {
+    redirect: false,
+    createFirstBlock: false
+  }
+)
+```
+
+**Manual Schema Setup (Optional):**
+Users CAN manually create tag/class pages in the Logseq UI and define property schemas, which will apply to all pages with that tag. But plugins cannot do this programmatically.
 
 ### Setting Properties on Existing Pages/Blocks
 
@@ -676,6 +745,12 @@ pnpm dev
 7. **Property Namespacing**: Plugin properties are auto-namespaced as `:plugin.property.{plugin-id}/{property-name}`
 8. **UUID Auto-generation**: When blocks lack UUIDs, the system auto-generates them during insertion
 9. **Case-Insensitive Tags**: Tag lookup by title is case-insensitive via `ldb/get-case-page`
+10. **Property Schemas on Tags - UI-ONLY** (POC 4):
+    - Property schemas CANNOT be defined programmatically on tag/class pages
+    - Requires `:logseq.property.class/properties` with db/id references
+    - Plugin API restricts: "Plugins can only upsert its own properties"
+    - No API exists to create property definition entities
+    - **Workaround**: Use type inference from JavaScript values (recommended approach)
 
 ## References
 
@@ -806,12 +881,17 @@ If migrating an existing markdown-based plugin to DB graphs:
 - Number, boolean, URL, text, multi-value array properties
 - Property auto-namespacing
 - Empty property auto-hiding
+- Creating tag/class pages with `{ class: true }`
+- Tagging pages via `#tag` in page title
+- Nested block structures with `insertBatchBlock`
+- HTML to Markdown conversion
 
 ❌ **Broken/Issues**:
 - Schema parameter causes DataCloneError
 - Date properties with reserved names fail validation
 - Property validation failures silently drop all subsequent properties
 - No way to create page references without schema
+- **Property schemas on tags - UI-only, no plugin API**
 
 **Best Practices**:
 1. Use actual JavaScript types (numbers, booleans) not strings
@@ -819,3 +899,6 @@ If migrating an existing markdown-based plugin to DB graphs:
 3. Test on actual DB graphs, not MD graphs
 4. Check browser console for validation errors
 5. Put most important properties first (validation failures drop subsequent ones)
+6. **Use type inference instead of attempting schema definition**
+7. Include tags in page title using `#tag` syntax
+8. Convert HTML to Markdown for proper formatting
