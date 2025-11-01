@@ -200,6 +200,50 @@ const page = await logseq.Editor.createPage(
   - **Critical**: When a property fails validation, ALL subsequent properties are silently dropped
 - ⚠️  **Page references**: Unknown if possible without schema parameter
 
+### Tagging Pages (DB)
+
+**CRITICAL**: To add tags to a page in DB graphs, include `#tagname` syntax in the page title. There is NO explicit `addTag()` API.
+
+```typescript
+// ✅ CORRECT - Tag in page title
+const page = await logseq.Editor.createPage(
+  'My Article #research #science',  // Tags parsed from title
+  {
+    title: 'Article Title',
+    year: 2025
+  },
+  {
+    redirect: false,
+    createFirstBlock: false
+  }
+)
+// Result: :block/tags #{"Page" "research" "science"}
+
+// ❌ WRONG - Custom property approach
+const page = await logseq.Editor.createPage(
+  'My Article',
+  {
+    tags: ['research', 'science']  // Creates :plugin.property.{id}/tags, NOT :block/tags
+  }
+)
+
+// ❌ WRONG - upsertBlockProperty approach
+await logseq.Editor.upsertBlockProperty(page.uuid, 'tags', ['research'])
+// Still creates :plugin.property.{id}/tags, NOT :block/tags
+// Also throws "Invalid datascript entities" error
+
+// ❌ WRONG - Tag in block content (tags the block, not the page)
+await logseq.Editor.appendBlockInPage('My Article', '#research')
+// Result: Block has tag, but page's :block/tags only has "Page"
+```
+
+**Key Points**:
+- Tags must be in page title using `#tagname` syntax
+- The `#tag` portion is parsed and removed from the displayed title
+- Tags are stored in `:block/tags` property (not a custom property)
+- Every page automatically has the `Page` tag
+- Custom `tags` properties are NOT the same as `:block/tags`
+
 ### Creating Tag/Class Pages (DB)
 
 ```typescript
