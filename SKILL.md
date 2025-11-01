@@ -724,6 +724,77 @@ pnpm dev
 - Use `console.log()` for debugging
 - Check Logseq's plugin console for errors
 
+### Exposing Functions to Browser Console (POC 6)
+
+**Problem**: Logseq plugins run in an iframe context, so setting functions on `window` doesn't make them accessible from the browser console.
+
+**Solution**: Expose functions to parent and top windows:
+
+```typescript
+async function main() {
+  // Your plugin code...
+
+  // Expose functions for console access
+  // @ts-ignore
+  globalThis.myFunction = myFunction
+
+  // For iframe context (Logseq plugins)
+  // @ts-ignore
+  if (typeof parent !== 'undefined' && parent.window) {
+    // @ts-ignore
+    parent.window.myFunction = myFunction
+  }
+
+  // @ts-ignore
+  if (typeof top !== 'undefined' && top.window && top !== window) {
+    // @ts-ignore
+    top.window.myFunction = myFunction
+  }
+}
+```
+
+**Usage**: Now you can call from browser console:
+```javascript
+await window.myFunction()
+```
+
+**Note**: This is useful for POC testing. Production plugins should use proper UI instead of console commands.
+
+### Checking for Duplicates (POC 6)
+
+**Best Practice**: Query by unique identifier property, not by page title.
+
+```typescript
+// ✅ BEST: Query by unique property
+async function checkIfExists(zoteroKey: string): Promise<boolean> {
+  try {
+    // Query database for pages with this property
+    const query = `(property zoteroKey "${zoteroKey}")`
+    const results = await logseq.DB.q(query)
+    return !!(results && results.length > 0)
+  } catch (error) {
+    console.warn('Query failed:', error)
+    return false
+  }
+}
+
+// ❌ AVOID: Title-based checking (false positives)
+async function checkIfExistsByTitle(title: string): Promise<boolean> {
+  const page = await logseq.Editor.getPage(title)
+  return !!page
+}
+```
+
+**Why query by property?**
+- Most reliable: unique identifiers prevent false positives
+- Works even if page title is modified
+- Handles duplicate titles correctly
+
+**Common use cases**:
+- Zotero import: check by `zoteroKey`
+- External IDs: check by `externalId`, `doi`, `isbn`, etc.
+- Any unique identifier property
+
 ## Resources
 
 - Official Plugin API: https://logseq.github.io/plugins/
@@ -885,6 +956,8 @@ If migrating an existing markdown-based plugin to DB graphs:
 - Tagging pages via `#tag` in page title
 - Nested block structures with `insertBatchBlock`
 - HTML to Markdown conversion
+- Database queries with `logseq.DB.q()` for duplicate detection
+- Exposing functions to browser console via parent/top window
 
 ❌ **Broken/Issues**:
 - Schema parameter causes DataCloneError
@@ -902,3 +975,5 @@ If migrating an existing markdown-based plugin to DB graphs:
 6. **Use type inference instead of attempting schema definition**
 7. Include tags in page title using `#tag` syntax
 8. Convert HTML to Markdown for proper formatting
+9. **Check for duplicates using `logseq.DB.q()` with unique property, not page title**
+10. **Expose test functions to parent/top window for iframe context**
