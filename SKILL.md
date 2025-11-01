@@ -795,12 +795,322 @@ async function checkIfExistsByTitle(title: string): Promise<boolean> {
 - External IDs: check by `externalId`, `doi`, `isbn`, etc.
 - Any unique identifier property
 
+## React Integration (POC 6)
+
+**CRITICAL**: Logseq plugins with React UIs require a specific setup pattern to work correctly.
+
+### Required Setup
+
+**1. HTML Entry Point Required**
+
+Logseq expects an `index.html` file, not just a JavaScript entry point:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Plugin Name</title>
+</head>
+<body>
+  <div id="app"></div>  <!-- Logseq provides this container -->
+  <script src="src/index.tsx" type="module"></script>
+</body>
+</html>
+```
+
+**2. Package.json Configuration**
+
+```json
+{
+  "logseq": {
+    "id": "plugin-id",
+    "title": "Plugin Title",
+    "icon": "./icon.svg",
+    "main": "dist/index.html"  // CRITICAL: Point to HTML not JS
+  },
+  "dependencies": {
+    "@logseq/libs": "^0.0.17",
+    "@mantine/core": "^7.0.0",  // Optional UI library
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite-plugin-logseq": "^1.1.2"  // CRITICAL for proper bundling
+  }
+}
+```
+
+**3. Vite Configuration - Use vite-plugin-logseq**
+
+```typescript
+import { defineConfig } from 'vite'
+import logseqDevPlugin from 'vite-plugin-logseq'
+
+export default defineConfig({
+  plugins: [logseqDevPlugin()],  // Handles React, externals, paths automatically
+})
+```
+
+**Why vite-plugin-logseq?**
+- Automatically handles `@logseq/libs` as external
+- Configures React plugin correctly
+- Sets up relative asset paths (`./assets/...` not `/assets/...`)
+- Handles all Logseq-specific bundling requirements
+
+**4. TypeScript Configuration**
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",  // CRITICAL: Enable JSX support
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": ["ESNext", "DOM"],
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"]
+}
+```
+
+### React Root Pattern
+
+**CRITICAL**: Create React root ONCE at plugin load, render on demand.
+
+```typescript
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { MantineProvider } from '@mantine/core'
+import '@mantine/core/styles.css'
+import { SearchUI } from './SearchUI'
+
+const main = async () => {
+  // Get the app div that Logseq provides via HTML
+  const el = document.getElementById('app')
+  if (!el) {
+    console.error('App element not found')
+    return
+  }
+
+  // ✅ CORRECT: Create root ONCE at plugin load
+  const root = createRoot(el)
+
+  // Register slash command
+  logseq.Editor.registerSlashCommand('Open UI', async () => {
+    // Render UI when command invoked (NOT StrictMode - see below)
+    root.render(
+      <MantineProvider>
+        <div style={{ /* modal backdrop styles */ }}>
+          <SearchUI onAction={handleAction} />
+        </div>
+      </MantineProvider>
+    )
+    logseq.showMainUI()
+  })
+
+  // Toolbar button
+  logseq.provideModel({
+    async showUI() {
+      root.render(/* same as above */)
+      logseq.showMainUI()
+    }
+  })
+
+  logseq.App.registerUIItem('toolbar', {
+    key: 'plugin-button',
+    template: `
+      <a data-on-click="showUI" class="button" title="Open Plugin">
+        <span>🔍</span>
+      </a>
+    `
+  })
+}
+
+logseq.ready(main).catch(console.error)
+```
+
+**Why this pattern?**
+- ❌ **DON'T** create new root on each UI show - causes crashes
+- ✅ **DO** create root once, call `root.render()` multiple times
+- Matches official Logseq plugin patterns
+
+### React.StrictMode Warning
+
+**CRITICAL BUG FIX**: DO NOT use React.StrictMode in Logseq plugins.
+
+```typescript
+// ❌ WRONG - Causes duplicate function calls
+root.render(
+  <React.StrictMode>
+    <MyComponent />
+  </React.StrictMode>
+)
+
+// ✅ CORRECT - No StrictMode
+root.render(
+  <MantineProvider>
+    <MyComponent />
+  </MantineProvider>
+)
+```
+
+**Why?**
+- React.StrictMode intentionally double-invokes functions in development
+- This causes duplicate API calls, duplicate imports, duplicate UI updates
+- In POC 6, this caused triple imports (StrictMode 2x + other render = 3x)
+- **Solution**: Remove StrictMode from plugin code
+
+### Preventing Duplicate Function Calls
+
+**Problem**: Even without StrictMode, async operations can be called multiple times due to React re-renders or event handler issues.
+
+**Solution**: Use a global lock for critical operations.
+
+```typescript
+// Global lock to prevent concurrent operations
+const operationLock = new Set<string>()
+
+async function criticalOperation(itemId: string): Promise<void> {
+  // Guard: check if already running
+  if (operationLock.has(itemId)) {
+    console.log(`[GUARD] Already processing ${itemId}, aborting`)
+    return
+  }
+
+  try {
+    // Acquire lock
+    operationLock.add(itemId)
+    console.log(`[OPERATION START] ${itemId}`)
+
+    // Do the actual work
+    await doWork(itemId)
+
+    console.log(`[OPERATION SUCCESS] ${itemId}`)
+  } catch (error) {
+    console.error(`[OPERATION ERROR] ${itemId}:`, error)
+  } finally {
+    // Always release lock
+    operationLock.delete(itemId)
+    console.log(`[OPERATION END] ${itemId}`)
+  }
+}
+```
+
+**Why global lock?**
+- React component state locks only protect within component
+- Parent function calls need protection at function level
+- Global Set ensures no concurrent calls across all contexts
+
+### Common React Integration Errors
+
+**Error 1: Blank Screen / App Crash**
+```
+Cause: Missing index.html or trying to use ReactDOM.createRoot() without proper DOM element
+Fix: Create index.html with <div id="app"></div>, ensure package.json points to it
+```
+
+**Error 2: Asset Loading Failure**
+```
+Error: GET file:///assets/index-xxx.css net::ERR_FILE_NOT_FOUND
+Cause: Vite generating absolute paths /assets/... instead of relative ./assets/...
+Fix: Use vite-plugin-logseq which handles this automatically
+```
+
+**Error 3: Module Specifier Error**
+```
+Error: Failed to resolve module specifier "@logseq/libs"
+Cause: @logseq/libs not properly marked as external
+Fix: Use vite-plugin-logseq which handles externals automatically
+```
+
+**Error 4: JSX Not Recognized**
+```
+Error: TS17004: Cannot use JSX unless the '--jsx' flag is provided
+Cause: Missing jsx configuration in tsconfig.json
+Fix: Add "jsx": "react-jsx" to compilerOptions
+```
+
+**Error 5: Duplicate Operations (Triple Import Bug)**
+```
+Symptoms: Same operation happens 2-3 times (e.g., triple alerts, triple data)
+Cause: React.StrictMode double-rendering + lack of operation lock
+Fix:
+  1. Remove React.StrictMode from render calls
+  2. Add global lock using Set for critical operations
+  3. Add detailed console logging to track execution flow
+```
+
+### React UI Best Practices
+
+**1. Component State for UI, Global Lock for Operations**
+
+```typescript
+// In React component - UI state
+const [importing, setImporting] = useState<string | null>(null)
+
+const handleImport = async (item: Item) => {
+  if (importing === item.key) return  // UI-level guard
+
+  try {
+    setImporting(item.key)  // Show UI feedback
+    await importItem(item)  // Calls function with global lock
+  } finally {
+    setImporting(null)
+  }
+}
+
+// In main index.tsx - global operation lock
+const importingItems = new Set<string>()
+
+async function importItem(item: Item) {
+  if (importingItems.has(item.key)) return  // Global guard
+  // ... rest of implementation
+}
+```
+
+**2. Visual Feedback During Operations**
+
+```typescript
+const isImporting = importing === item.key
+
+<div
+  style={{
+    pointerEvents: isImporting ? 'none' : 'auto',  // Disable clicks
+    opacity: isImporting ? 0.6 : 1
+  }}
+  onClick={() => !isImporting && handleAction(item)}
+>
+  <Badge color={isImporting ? 'blue' : 'green'}>
+    {isImporting ? 'Processing...' : 'Click to process'}
+  </Badge>
+</div>
+```
+
+**3. Detailed Logging for Debugging**
+
+```typescript
+console.log(`[GUARD] Already importing ${key}, aborting`)
+console.log(`[IMPORT START] ${key}`)
+console.log(`[IMPORT SUCCESS] ${key}`)
+console.log(`[IMPORT ERROR] ${key}:`, error)
+console.log(`[IMPORT END] ${key}`)
+```
+
+Use clear tag prefixes ([GUARD], [START], [SUCCESS], [ERROR], [END]) to track execution flow.
+
 ## Resources
 
 - Official Plugin API: https://logseq.github.io/plugins/
 - Plugin Samples: https://github.com/logseq/logseq-plugin-samples
 - @logseq/libs documentation: https://logseq.github.io/plugins/
 - Community plugins: https://github.com/logseq/marketplace
+- vite-plugin-logseq: https://github.com/pengx17/logseq-plugin-template-react
 
 ## Known Issues & Gotchas
 
@@ -822,6 +1132,13 @@ async function checkIfExistsByTitle(title: string): Promise<boolean> {
     - Plugin API restricts: "Plugins can only upsert its own properties"
     - No API exists to create property definition entities
     - **Workaround**: Use type inference from JavaScript values (recommended approach)
+11. **React Integration Issues** (POC 6):
+    - **MUST** use `index.html` entry point, not just JS
+    - **MUST** use `vite-plugin-logseq` for proper bundling
+    - **DO NOT** use React.StrictMode - causes duplicate function calls
+    - **Create React root ONCE** at plugin load, not on each UI show
+    - Use global locks (Set) for async operations to prevent duplicates
+    - Asset paths must be relative (`./assets/`) not absolute (`/assets/`)
 
 ## References
 
@@ -958,6 +1275,8 @@ If migrating an existing markdown-based plugin to DB graphs:
 - HTML to Markdown conversion
 - Database queries with `logseq.DB.q()` for duplicate detection
 - Exposing functions to browser console via parent/top window
+- React UI integration with proper setup (index.html + vite-plugin-logseq)
+- React root pattern (create once, render multiple times)
 
 ❌ **Broken/Issues**:
 - Schema parameter causes DataCloneError
@@ -965,6 +1284,7 @@ If migrating an existing markdown-based plugin to DB graphs:
 - Property validation failures silently drop all subsequent properties
 - No way to create page references without schema
 - **Property schemas on tags - UI-only, no plugin API**
+- React.StrictMode causes duplicate function calls - must be avoided
 
 **Best Practices**:
 1. Use actual JavaScript types (numbers, booleans) not strings
@@ -977,3 +1297,10 @@ If migrating an existing markdown-based plugin to DB graphs:
 8. Convert HTML to Markdown for proper formatting
 9. **Check for duplicates using `logseq.DB.q()` with unique property, not page title**
 10. **Expose test functions to parent/top window for iframe context**
+11. **For React plugins**:
+    - Use `index.html` entry point with `<div id="app"></div>`
+    - Use `vite-plugin-logseq` for bundling
+    - Create React root once at plugin load
+    - Never use React.StrictMode
+    - Use global locks (Set) for async operations to prevent duplicates
+    - Add detailed logging with [TAG] prefixes for debugging
