@@ -111,40 +111,80 @@ Not applicable - tags are just page references.
 
 ### DB Graphs
 
-**Key Difference**: DB graphs have dedicated class/tag pages that can define property schemas for all tagged pages.
+**Key Difference**: DB graphs have dedicated class/tag pages, but plugin API cannot set class property schemas.
 
 ```typescript
-// Create a class page with schema (v0.2.3+)
+// Create a class page (v0.2.3+)
 const tagPage = await logseq.Editor.createPage(
-  'research',  // Class name
+  'research',
   {},
   {
-    class: true,
-    schema: {
-      year: { type: 'number' },
-      title: { type: 'string' },
-      verified: { type: 'checkbox' },
-      publicationDate: { type: 'date' }
-    }
+    class: true
   } as any
-)
-
-// Pages tagged with #research will inherit this schema
-const article = await logseq.Editor.createPage(
-  'Study on XYZ #research',
-  {
-    year: 2025,
-    title: 'XYZ Study',
-    verified: true,
-    publicationDate: '2025-01-15'
-  }
 )
 ```
 
-**Important**:
-- Class pages get auto-generated ident: `:user.class/research-XXXXXXXX`
-- Schema must be passed during creation - no API to add it later
-- This enables programmatic tag schema setup (major improvement in v0.2.3)
+**IMPORTANT LIMITATION**: The `schema` parameter on `createPage()` creates **page-level schemas**, NOT class schemas. Plugins cannot programmatically set the `:logseq.property.class/properties` field due to security restrictions.
+
+### Alternative: Property Entities with Schemas
+
+Instead of class schemas, use property entities:
+
+```typescript
+// Step 1: Create property entities with schemas
+await logseq.Editor.upsertProperty('year', {
+  type: 'number'
+})
+
+await logseq.Editor.upsertProperty('title', {
+  type: 'string'
+})
+
+await logseq.Editor.upsertProperty('tags', {
+  type: 'string',
+  cardinality: 'many'
+})
+
+// Step 2: Use properties on pages with explicit schemas
+const page = await logseq.Editor.createPage(
+  'Study on XYZ #research',
+  {}
+)
+
+// Set each property with its schema
+await logseq.Editor.upsertBlockProperty(
+  page.uuid,
+  'year',
+  2025,
+  { type: 'number' }
+)
+
+await logseq.Editor.upsertBlockProperty(
+  page.uuid,
+  'title',
+  'XYZ Study',
+  { type: 'string' }
+)
+```
+
+**Why This Works**:
+- Property entities are created with schemas stored at the property level
+- `upsertBlockProperty()` with schema parameter sets typed values on pages
+- Properties maintain correct types without class schema inheritance
+- Fully automatic - no manual setup required
+
+**What Cannot Be Done**:
+```typescript
+// ❌ FAILS - Plugins cannot set class/properties
+await logseq.Editor.upsertBlockProperty(
+  classPage.uuid,
+  'class/properties',
+  ['year', 'title', 'verified']
+)
+// Error: "Plugins can only upsert its own properties"
+```
+
+The `:logseq.property.class/properties` field is a system property that plugins cannot modify. Users must manually add properties to class schemas via the Logseq UI if they want centralized schema management.
 
 ## Adding Tags to Pages
 
@@ -226,6 +266,74 @@ const blocks = await logseq.Editor.insertBatchBlock(
 - `properties` parameter in `insertBatchBlock` is **not supported** in DB graphs
 - Use `insertBlock` with `properties` option instead for individual blocks
 - Blocks without UUIDs get auto-generated UUIDs
+
+## Property Management
+
+### Creating Property Entities (v0.2.3+)
+
+**DB Graphs Only**: Properties can be created as standalone entities with schemas.
+
+```typescript
+// Create a property entity with schema
+const property = await logseq.Editor.upsertProperty('customField', {
+  type: 'string',
+  cardinality: 'one'
+})
+
+// Property is created with namespace
+// Result: :plugin.property.my-plugin-id/customfield
+
+// Get property entity
+const prop = await logseq.Editor.getProperty('customField')
+console.log(prop.id)  // Database ID
+console.log(prop.type)  // 'string'
+```
+
+**Available Schema Options**:
+```typescript
+{
+  type: 'default' | 'number' | 'date' | 'datetime' | 'checkbox' | 'url' | 'node' | 'json' | 'string',
+  cardinality: 'one' | 'many',  // Default: 'one'
+  hide?: boolean,
+  public?: boolean
+}
+```
+
+**Benefits**:
+- Properties get database IDs
+- Schemas stored at property level
+- Reusable across pages
+- Type validation automatic
+
+### Setting Properties with Schemas
+
+```typescript
+// Set a property on a block/page with schema
+await logseq.Editor.upsertBlockProperty(
+  page.uuid,
+  'year',
+  2025,
+  { type: 'number' }
+)
+
+// Multi-value property
+await logseq.Editor.upsertBlockProperty(
+  page.uuid,
+  'tags',
+  ['research', 'science'],
+  { type: 'string', cardinality: 'many' }
+)
+```
+
+**When to use `upsertBlockProperty()` with schema**:
+- When you need explicit type control per-property
+- When property entity doesn't exist yet
+- When you want to ensure type even if property schema changes
+
+**When to use `upsertProperty()` first**:
+- When you have a set of standard properties
+- When you want centralized schema definitions
+- When you want to reuse schemas across many pages
 
 ## Property Handling
 
@@ -385,7 +493,7 @@ await window.myTestFunction()
 2. **Properties auto-namespaced** - Can't modify `:block/tags` directly
 3. **Reserved names drop subsequent properties** - Use alternative names
 4. **HTML must be converted to markdown** - Use Turndown
-5. **Schema must be set at creation** - No API to add later
+5. **Cannot set class schemas programmatically** - Use `upsertProperty()` and `upsertBlockProperty()` instead
 6. **TypeScript defs lag behind** - Use `as any` for schema parameters
 7. **Query by unique properties** - Not by page titles
 
@@ -411,8 +519,44 @@ await window.myTestFunction()
 
 1. **No tag insertion API** - Must use `#tag` in title
 2. **Reserved date properties partially broken** - Drop subsequent properties
-3. **No schema modification API** - Must set during creation
+3. **Cannot set class property schemas programmatically** - `:logseq.property.class/properties` is a system property that plugins cannot modify. Users must manually configure class schemas in the UI.
 4. **TypeScript definitions incomplete** - `schema` and `class` parameters not defined
+
+### Class Schema Workaround
+
+Since plugins cannot set class schemas, use this pattern:
+
+```typescript
+// Create property entities on plugin init
+async function initProperties() {
+  const properties = {
+    year: { type: 'number' },
+    title: { type: 'string' },
+    verified: { type: 'checkbox' }
+  }
+
+  for (const [name, schema] of Object.entries(properties)) {
+    await logseq.Editor.upsertProperty(name, schema)
+  }
+}
+
+// Use explicit schemas when setting properties on pages
+async function createPage(data) {
+  const page = await logseq.Editor.createPage(
+    `${data.title} #mytag`,
+    {}
+  )
+
+  await logseq.Editor.upsertBlockProperty(
+    page.uuid, 'year', data.year, { type: 'number' }
+  )
+  await logseq.Editor.upsertBlockProperty(
+    page.uuid, 'title', data.title, { type: 'string' }
+  )
+}
+```
+
+This provides typed properties without requiring class schema setup.
 
 ## Requirements
 
@@ -423,11 +567,13 @@ await window.myTestFunction()
 
 ## Best Practices
 
-1. Always pass schema parameter for clarity and type safety
-2. Use alternative names for date properties (avoid `created`, `modified`)
-3. Include tags in page title using `#tag` syntax
-4. Convert HTML to markdown using Turndown
-5. Query by unique properties (DOI, URL) for duplicate detection
-6. Put critical properties first (validation failures drop subsequent ones)
-7. Expose test functions to parent window for console testing
-8. Use `as any` for schema parameters until TypeScript defs are updated
+1. **Create property entities first** - Use `upsertProperty()` to define reusable properties with schemas
+2. **Use explicit schemas** - Pass schema parameter to `upsertBlockProperty()` for type safety
+3. **Alternative names for reserved properties** - Avoid `created`, `modified`, `updated`
+4. **Tags in page title** - Include tags using `#tag` syntax, not as properties
+5. **Convert HTML to markdown** - Use Turndown for DB graphs
+6. **Query by unique properties** - Use DOI, URL, etc. for duplicate detection, not page titles
+7. **Critical properties first** - Put important properties early (validation failures drop subsequent ones)
+8. **Expose test functions** - Use `parent.window` for console testing
+9. **Type assertions** - Use `as any` for schema parameters until TypeScript defs updated
+10. **Document manual setup** - If class schemas are important for your use case, provide user instructions for manual configuration
